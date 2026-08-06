@@ -1,10 +1,10 @@
 module systolic #(
     parameter MATRIX_SIZE = 4,
     parameter DATA_WIDTH  = 4,
-    parameter PSUM_WIDTH  = 4
+    parameter PSUM_WIDTH  = 10
 )(
     input  logic clk,
-    input  logic rst,          
+    input  logic rst_n,          
 
     input  logic start,
 
@@ -60,7 +60,7 @@ module systolic #(
         .PSUM_WIDTH(PSUM_WIDTH)
     ) dut (
         .clk(clk), 
-        .rst(rst), 
+        .rst_n(rst_n), 
         .start(start),
         .A(arr_mat_A), 
         .B(arr_mat_B), 

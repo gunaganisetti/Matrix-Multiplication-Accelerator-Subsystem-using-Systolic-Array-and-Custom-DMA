@@ -1,14 +1,14 @@
 module pe_array #(
     parameter int MATRIX_SIZE = 4,
     parameter int DATA_WIDTH  = 4,
-    parameter int PSUM_WIDTH  = 4 
+    parameter int PSUM_WIDTH  = 10 
 )(
     input  logic clk,
-    input  logic rst,
+    input  logic rst_n,
 
     input  logic start,
 
-    // 2D Input Matrices
+    // 2D Input Matrices 
     input  logic [DATA_WIDTH - 1 : 0] A [0 : MATRIX_SIZE - 1][0 : MATRIX_SIZE - 1],
     input  logic [DATA_WIDTH - 1 : 0] B [0 : MATRIX_SIZE - 1][0 : MATRIX_SIZE - 1],
 
@@ -27,18 +27,19 @@ module pe_array #(
 
     logic pe_en;
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (rst_n) begin
-            running <= 1'b0;
-        end else if ( start) begin
-            running <= 1'b1;
-        end else if ( counter == (3* MATRIX_SIZE - 1)) begin
-            running <= 1'b0;
-        end
-    end
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        running <= 1'b0;
+    else if (start)
+        running <= 1'b1;
+    else if (counter == (3*MATRIX_SIZE-1))
+        running <= 1'b0;
+    else
+        running <= running;
+end
 
     always_ff @(posedge clk or negedge rst_n) begin
-        if (rst_n) begin
+        if (!rst_n) begin
             counter <= '0;
         end 
         else if (running || start) begin
@@ -97,7 +98,7 @@ module pe_array #(
                 .DEPTH(k)
             ) d_ff_skew_in (
                 .clk (clk),
-                .rst (rst),
+                .rst_n (rst_n),
                 .en  (pe_en),
                 .din (data_in_A[k]),
                 .dout(data_in_skewed_A[k])
@@ -142,7 +143,7 @@ module pe_array #(
                     .PSUM_WIDTH(PSUM_WIDTH)
                 ) u_pe (
                     .clk       (clk),
-                    .rst       (rst),
+                    .rst_n       (rst_n),
                     
                     // Horizontal activation flow
                     .in        (a_wire[r][c]),
@@ -166,9 +167,9 @@ module pe_array #(
     // ------------------------------------------------------------------------
 
     
-    logic [PSUM_WIDTH - 1 : 0] data_out_skewed    [0 : MATRIX_SIZE - 1];
-    logic [PSUM_WIDTH - 1 : 0] data_out_unskewed  [0 : MATRIX_SIZE - 1];
-
+// Unskew chain now carries the WIDE psum, not DATA_WIDTH
+logic [PSUM_WIDTH-1:0] data_out_skewed    [0 : MATRIX_SIZE - 1];
+logic [PSUM_WIDTH-1:0] data_out_unskewed  [0 : MATRIX_SIZE - 1];
     // Grab raw outputs emerging from bottom row of PE array
     genvar col;
     generate
@@ -189,7 +190,7 @@ module pe_array #(
                 .DEPTH(MATRIX_SIZE - 1 - out_col)
             ) d_ff_unskew_out (
                 .clk (clk),
-                .rst (rst),
+                .rst_n (rst_n),
                 .en  (pe_en),
                 .din (data_out_skewed[out_col]),
                 .dout(data_out_unskewed[out_col]) // Re-aligned row output
@@ -199,18 +200,24 @@ module pe_array #(
 
     localparam int START_OUT_CYCLE = 2 * MATRIX_SIZE - 1;
     localparam int END_OUT_CYCLE   = 3 * MATRIX_SIZE - 2;
-
+    localparam logic [PSUM_WIDTH-1:0] SAT_MAX = (1 << DATA_WIDTH) - 1;
     // Calculate row index directly from main counter
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (rst_n) begin
-            OUT <= '{default: '0};
-        end 
-        else if (running && (counter >= START_OUT_CYCLE) && (counter <= END_OUT_CYCLE)) begin
-            for (int col_idx = 0; col_idx < MATRIX_SIZE; col_idx++) begin
-                OUT[counter - START_OUT_CYCLE][col_idx] <= data_out_unskewed[col_idx];
-            end
+// Quantize to DATA_WIDTH only here, once, at final sampling:
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        OUT <= '{default:'0};
+    end
+    else if (running &&
+             (counter >= START_OUT_CYCLE) &&
+             (counter <= END_OUT_CYCLE)) begin
+        for (int col_idx = 0; col_idx < MATRIX_SIZE; col_idx++) begin
+            // truncating quantization: keep low DATA_WIDTH bits of full-precision psum
+            // Truncating version:
+OUT[counter-START_OUT_CYCLE][col_idx] <=
+    data_out_unskewed[col_idx][DATA_WIDTH-1:0];
         end
     end
+end
 
     // Valid signal active during the sampling window
     //assign valid = running && (counter >= START_OUT_CYCLE + 1) && (counter <= END_OUT_CYCLE + 1);
