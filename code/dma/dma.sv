@@ -8,33 +8,33 @@ module dma #(
 )(
     input  logic clk,  
     input  logic rst_n,    
-    
+   
     // AXI4-Lite Register Slave Interface
     input  logic [ADDR_WIDTH - 1:0] s_axi_lite_awaddr,  
-    input  logic                    s_axi_lite_awvalid, 
-    output logic                    s_axi_lite_awready, 
+    input  logic                    s_axi_lite_awvalid,
+    output logic                    s_axi_lite_awready,
 
-    input  logic [DATA_WIDTH - 1:0] s_axi_lite_wdata,   
+    input  logic [DATA_WIDTH - 1:0] s_axi_lite_wdata,  
     input  logic                    s_axi_lite_wvalid,  
     output logic                    s_axi_lite_wready,  
 
-    output logic [1:0]              s_axi_lite_bresp,   
+    output logic [1:0]              s_axi_lite_bresp,  
     output logic                    s_axi_lite_bvalid,  
     input  logic                    s_axi_lite_bready,  
 
     input  logic [ADDR_WIDTH - 1:0] s_axi_lite_araddr,  
-    input  logic                    s_axi_lite_arvalid, 
-    output logic                    s_axi_lite_arready, 
+    input  logic                    s_axi_lite_arvalid,
+    output logic                    s_axi_lite_arready,
 
-    output logic [DATA_WIDTH - 1:0] s_axi_lite_rdata,   
-    output logic [1:0]              s_axi_lite_rresp,   
+    output logic [DATA_WIDTH - 1:0] s_axi_lite_rdata,  
+    output logic [1:0]              s_axi_lite_rresp,  
     output logic                    s_axi_lite_rvalid,  
     input  logic                    s_axi_lite_rready,  
 
     // AXI4 Master Interface (Memory Read & Write)
-    output logic [ADDR_WIDTH - 1:0]     m_axi_araddr,   
+    output logic [ADDR_WIDTH - 1:0]     m_axi_araddr,  
     output logic [7:0]                  m_axi_arlen,    
-    output logic [2:0]                  m_axi_arsize,   
+    output logic [2:0]                  m_axi_arsize,  
     output logic [1:0]                  m_axi_arburst,  
     output logic                        m_axi_arvalid,  
     input  logic                        m_axi_arready,  
@@ -42,33 +42,33 @@ module dma #(
     input  logic [DATA_WIDTH - 1:0]     m_axi_rdata,    
     input  logic [1:0]                  m_axi_rresp,    
     input  logic                        m_axi_rlast,    
-    input  logic                        m_axi_rvalid,   
-    output logic                        m_axi_rready,   
+    input  logic                        m_axi_rvalid,  
+    output logic                        m_axi_rready,  
 
-    output logic [ADDR_WIDTH - 1:0]     m_axi_awaddr,   
+    output logic [ADDR_WIDTH - 1:0]     m_axi_awaddr,  
     output logic [7:0]                  m_axi_awlen,    
-    output logic [2:0]                  m_axi_awsize,   
+    output logic [2:0]                  m_axi_awsize,  
     output logic [1:0]                  m_axi_awburst,  
     output logic                        m_axi_awvalid,  
     input  logic                        m_axi_awready,  
 
     output logic [DATA_WIDTH - 1:0]     m_axi_wdata,    
     output logic [(DATA_WIDTH/8) - 1:0] m_axi_wstrb,    
-    output logic                        m_axi_wvalid,   
+    output logic                        m_axi_wvalid,  
     output logic                        m_axi_wlast,    
-    input  logic                        m_axi_wready,   
-    
+    input  logic                        m_axi_wready,  
+   
     input  logic [1:0]                  m_axi_bresp,    
-    input  logic                        m_axi_bvalid,   
-    output logic                        m_axi_bready,   
+    input  logic                        m_axi_bvalid,  
+    output logic                        m_axi_bready,  
 
     // AXI-Stream Accelerator Interfaces
     output logic [STREAM_WIDTH - 1:0]  m_axis_mm2s_tdata,  
-    output logic                       m_axis_mm2s_tvalid, 
-    input  logic                       m_axis_mm2s_tready, 
+    output logic                       m_axis_mm2s_tvalid,
+    input  logic                       m_axis_mm2s_tready,
 
     input  logic [STREAM_WIDTH - 1:0]  s_axis_s2mm_tdata,  
-    input  logic                       s_axis_s2mm_tvalid, 
+    input  logic                       s_axis_s2mm_tvalid,
     output logic                       s_axis_s2mm_tready  
 );
 
@@ -80,6 +80,12 @@ module dma #(
     localparam int PACK_LIMIT        = PACK_BUF_WIDTH / STREAM_WIDTH;
     localparam int PACK_CNT_WIDTH    = $clog2(PACK_LIMIT + 1);
 
+    // MM2S (read) burst length -- number of AXI4 beats per AR request.
+    // Was 1 (arlen always 0); now groups up to 4 words per burst,
+    // with the tail burst shortened to whatever's left if the total
+    // transfer isn't an exact multiple of 4 words.
+    localparam int MM2S_BURST_LEN = 4;
+
     // Register address map
     localparam ADDR_CTRL = 8'h00;  
     localparam ADDR_STAT = 8'h04;  
@@ -87,7 +93,7 @@ module dma #(
     localparam ADDR_DEST = 8'h0C;  
     localparam ADDR_LEN  = 8'h10;  
 
-    localparam [2:0] AXSIZE_BYTES = $clog2(BYTES_PER_WORD); 
+    localparam [2:0] AXSIZE_BYTES = $clog2(BYTES_PER_WORD);
     localparam [1:0] AXBURST_INCR = 2'b01;  
 
     assign m_axi_arsize  = AXSIZE_BYTES;
@@ -96,17 +102,17 @@ module dma #(
     assign m_axi_awburst = AXBURST_INCR;
 
     // Registers
-    logic [DATA_WIDTH - 1:0] reg_ctrl;         
-    logic [DATA_WIDTH - 1:0] reg_status;       
-    logic [DATA_WIDTH - 1:0] reg_src_addr;   
-    logic [DATA_WIDTH - 1:0] reg_dest_addr; 
-    logic [DATA_WIDTH - 1:0] reg_xfer_len;     
+    logic [DATA_WIDTH - 1:0] reg_ctrl;        
+    logic [DATA_WIDTH - 1:0] reg_status;      
+    logic [DATA_WIDTH - 1:0] reg_src_addr;  
+    logic [DATA_WIDTH - 1:0] reg_dest_addr;
+    logic [DATA_WIDTH - 1:0] reg_xfer_len;    
 
-    logic start_pulse;         
-    logic rd_done, wr_done;   
+    logic start_pulse;        
+    logic rd_done, wr_done;  
     logic rd_error, wr_error;  
     logic busy;                
-    
+   
     assign busy = reg_status[0];
 
     // Status Register Logic
@@ -136,7 +142,7 @@ module dma #(
             s_axi_lite_bresp   <= 2'b00;
         end else begin
             start_pulse <= 1'b0;
-            
+           
             if (s_axi_lite_awvalid && s_axi_lite_wvalid && !s_axi_lite_bvalid) begin
                 s_axi_lite_awready <= 1'b1;
                 s_axi_lite_wready  <= 1'b1;
@@ -144,12 +150,12 @@ module dma #(
                 case (s_axi_lite_awaddr[7:0])
                     ADDR_CTRL: begin
                         reg_ctrl <= s_axi_lite_wdata;
-                        if (s_axi_lite_wdata[0]) 
+                        if (s_axi_lite_wdata[0])
                             start_pulse <= 1'b1;
                     end
-                    ADDR_SRC:  reg_src_addr  <= s_axi_lite_wdata; 
-                    ADDR_DEST: reg_dest_addr <= s_axi_lite_wdata; 
-                    ADDR_LEN:  reg_xfer_len  <= s_axi_lite_wdata; 
+                    ADDR_SRC:  reg_src_addr  <= s_axi_lite_wdata;
+                    ADDR_DEST: reg_dest_addr <= s_axi_lite_wdata;
+                    ADDR_LEN:  reg_xfer_len  <= s_axi_lite_wdata;
                 endcase
 
                 s_axi_lite_bvalid <= 1'b1;
@@ -173,7 +179,7 @@ module dma #(
             s_axi_lite_rresp   <= 2'b00;
         end else begin
             if (s_axi_lite_arvalid && !s_axi_lite_rvalid) begin
-                s_axi_lite_arready <= 1'b1; 
+                s_axi_lite_arready <= 1'b1;
                 s_axi_lite_rvalid  <= 1'b1;
 
                 case (s_axi_lite_araddr[7:0])
@@ -194,13 +200,15 @@ module dma #(
         end
     end
 
-    // MM2S Engine (Memory-to-Stream)
+    // MM2S Engine (Memory-to-Stream) -- now issues MM2S_BURST_LEN-beat
+    // (default 4) INCR bursts instead of one AR per word.
     typedef enum logic [2:0] {R_IDLE, R_ADDR, R_DATA, R_UNPACK, R_DONE} r_state_t;
     r_state_t r_state;
    
-    logic [DATA_WIDTH - 1:0]        rd_buf;         
+    logic [DATA_WIDTH - 1:0]        rd_buf;        
     logic [DATA_WIDTH - 1:0]        rd_bytes_left;  
-    logic [UNPACK_IDX_WIDTH - 1:0]  unpack_idx;   
+    logic [UNPACK_IDX_WIDTH - 1:0]  unpack_idx;  
+    logic                           rd_last_beat;   // latched m_axi_rlast for the beat currently being unpacked
 
    // assign m_axis_mm2s_tdata = rd_buf[(unpack_idx * STREAM_WIDTH) +: STREAM_WIDTH];
    assign m_axis_mm2s_tdata = rd_buf[(DATA_WIDTH - (unpack_idx + 1) * STREAM_WIDTH) +: STREAM_WIDTH];
@@ -215,14 +223,15 @@ module dma #(
             rd_error           <= 1'b0;
             unpack_idx         <= '0;
             rd_bytes_left      <= '0;
+            rd_last_beat       <= 1'b0;
             r_state            <= R_IDLE;
         end else begin
             case (r_state)
                 R_IDLE: begin
                     if (start_pulse) begin
                         m_axi_araddr  <= reg_src_addr;  
-                        rd_bytes_left <= reg_xfer_len; 
-                        rd_done       <= 1'b0;           
+                        rd_bytes_left <= reg_xfer_len>> $clog2(BYTES_PER_WORD);
+                        rd_done       <= 1'b0;          
                         rd_error      <= 1'b0;        
                         r_state       <= R_ADDR;        
                     end
@@ -230,20 +239,28 @@ module dma #(
 
                 R_ADDR: begin
                     m_axi_arvalid <= 1'b1;
-                    m_axi_arlen   <= 8'd0;
+
+                    // Burst length for THIS request: as many words as are
+                    // left, capped at MM2S_BURST_LEN. Shortens automatically
+                    // for the final (tail) burst of a transfer.
+                    if (rd_bytes_left >= MM2S_BURST_LEN)
+                        m_axi_arlen <= MM2S_BURST_LEN[7:0] - 8'd1;
+                    else
+                        m_axi_arlen <= rd_bytes_left[7:0] - 8'd1;
 
                     if (m_axi_arvalid && m_axi_arready) begin
-                        m_axi_arvalid <= 1'b0;   
-                        m_axi_rready  <= 1'b1;   
+                        m_axi_arvalid <= 1'b0;  
+                        m_axi_rready  <= 1'b1;  
                         r_state       <= R_DATA;
                     end
                 end
 
                 R_DATA: begin
                     if (m_axi_rvalid && m_axi_rready) begin
-                        rd_buf       <= m_axi_rdata;             
-                        if (m_axi_rresp != 2'b00) 
-                            rd_error <= 1'b1; 
+                        rd_buf       <= m_axi_rdata;            
+                        rd_last_beat <= m_axi_rlast;
+                        if (m_axi_rresp != 2'b00)
+                            rd_error <= 1'b1;
 
                         m_axi_rready <= 1'b0;                
                         unpack_idx   <= '0;                    
@@ -252,24 +269,33 @@ module dma #(
                 end
 
                R_UNPACK: begin
-                         m_axis_mm2s_tvalid <= 1'b1;
+    m_axis_mm2s_tvalid <= 1'b1;
 
-                         if (m_axis_mm2s_tvalid && m_axis_mm2s_tready) begin
-                             if (unpack_idx == (UNPACK_LIMIT - 1)) begin
-                                m_axis_mm2s_tvalid <= 1'b0;
-                                m_axi_araddr       <= m_axi_araddr + BYTES_PER_WORD;
-                                if (rd_bytes_left <= BYTES_PER_WORD) begin
-                                   rd_done <= 1'b1;
-                                   r_state <= R_DONE;
-                                end else begin
-                                   rd_bytes_left <= rd_bytes_left - BYTES_PER_WORD;
-                                   r_state       <= R_ADDR;
-                                end
-                          end else begin
-                             unpack_idx <= unpack_idx + 1'b1;
-                             end
-                         end
-               end
+    if (m_axis_mm2s_tvalid && m_axis_mm2s_tready) begin
+        if (unpack_idx == (UNPACK_LIMIT - 1)) begin
+            m_axis_mm2s_tvalid <= 1'b0;
+            m_axi_araddr       <= m_axi_araddr + BYTES_PER_WORD;
+            if (rd_bytes_left <= 1'b1) begin
+                rd_done <= 1'b1;
+                r_state <= R_DONE;
+            end else begin
+                rd_bytes_left <= rd_bytes_left - 1'b1;
+                if (rd_last_beat) begin
+                    // Burst exhausted but more words remain overall --
+                    // need a fresh AR for the next burst.
+                    r_state <= R_ADDR;
+                end else begin
+                    // More beats already in flight for this burst --
+                    // just accept the next one, no new AR needed.
+                    m_axi_rready <= 1'b1;
+                    r_state      <= R_DATA;
+                end
+            end
+        end else begin
+            unpack_idx <= unpack_idx + 1'b1;
+        end
+    end
+end
 
                 R_DONE: begin
                     m_axis_mm2s_tvalid <= 1'b0;
@@ -281,7 +307,7 @@ module dma #(
         end
     end
 
-    // S2MM Engine (Stream-to-Memory)
+    // S2MM Engine (Stream-to-Memory) -- unchanged
     typedef enum logic [2:0] {W_IDLE, W_PACK, W_ADDR, W_DATA, W_RESP, W_DONE} w_state_t;
     w_state_t w_state;
 
@@ -289,7 +315,7 @@ module dma #(
     logic [PACK_CNT_WIDTH - 1:0] pack_elm_cnt;    
     logic [DATA_WIDTH - 1:0]     wr_bytes_left;  
 
-    assign s_axis_s2mm_tready = (w_state == W_PACK); 
+    assign s_axis_s2mm_tready = (w_state == W_PACK);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -311,56 +337,48 @@ module dma #(
         end else begin
             case (w_state)
                 W_IDLE: begin
-                        wr_done  <= 1'b0;   
-                        wr_error <= 1'b0;   
+    wr_done  <= 1'b0;  
+    wr_error <= 1'b0;  
 
-                        if (start_pulse) begin
-                          m_axi_awaddr  <= reg_dest_addr;  
-                          wr_bytes_left <= reg_xfer_len >> 1;   // <-- apply the 2:1 reduction here
-                          pack_elm_cnt  <= '0;  
-                          w_state       <= W_PACK;
-                          end
-                       end
-                
+    if (start_pulse) begin
+        m_axi_awaddr  <= reg_dest_addr;  
+        wr_bytes_left <= (reg_xfer_len >> 1)>>$clog2(BYTES_PER_WORD*2);   // <-- apply the 2:1 reduction here
+        pack_elm_cnt  <= '0;  
+        w_state       <= W_PACK;
+    end
+end
+               
                 W_PACK: begin
-                       if (s_axis_s2mm_tvalid && s_axis_s2mm_tready) begin
+                    if (s_axis_s2mm_tvalid && s_axis_s2mm_tready) begin
+                        // W_PACK (write side): store first-arriving nibble at the top of pack_buf
+                       // Fixed - packs first-arriving nibble into pack_buf's MSB:
+                        pack_buf[(PACK_BUF_WIDTH - (pack_elm_cnt + 1) * STREAM_WIDTH) +: STREAM_WIDTH] <= s_axis_s2mm_tdata;
+                        pack_elm_cnt                                            <= pack_elm_cnt + 1'b1;
 
-                          pack_buf[(PACK_BUF_WIDTH - (pack_elm_cnt + 1) * STREAM_WIDTH) +: STREAM_WIDTH] <= s_axis_s2mm_tdata;
-                          pack_elm_cnt                                            <= pack_elm_cnt + 1'b1;
-
-                          $display("[%0t] DMA W_PACK  elm_cnt=%0d nibble_in=%h -> pack_buf_bits[%0d +: %0d]",$time, pack_elm_cnt, s_axis_s2mm_tdata,
-                          (PACK_BUF_WIDTH - (pack_elm_cnt + 1) * STREAM_WIDTH), STREAM_WIDTH);
-
-                          if ((pack_elm_cnt == (PACK_LIMIT - 1)) || (((pack_elm_cnt + 1) * STREAM_WIDTH / 8) >= wr_bytes_left)) begin
-                             w_state <= W_ADDR;
-                             $display("[%0t] DMA W_PACK  -> W_ADDR, final pack_buf=%h (elm_cnt=%0d, wr_bytes_left=%0d)",$time, pack_buf, pack_elm_cnt, wr_bytes_left);
-                          end
+                        if (pack_elm_cnt == (PACK_LIMIT - 1)) begin
+                            w_state <= W_ADDR;      
                         end
+                    end
                 end
 
-              W_ADDR: begin
-                      m_axi_awvalid <= 1'b1;
-                      m_axi_awlen   <= 8'd1; 
+                W_ADDR: begin
+                    m_axi_awvalid <= 1'b1;
+                    m_axi_awlen   <= 8'd1;
 
-                      if (m_axi_awvalid && m_axi_awready) begin
-                          m_axi_awvalid <= 1'b0;    
-                          m_axi_wvalid  <= 1'b1;           
-                          m_axi_wdata   <= pack_buf[DATA_WIDTH - 1:0]; 
-                          m_axi_wstrb   <= '1;        
-                          m_axi_wlast   <= 1'b0;     
-                          w_state       <= W_DATA;
-
-                          $display("[%0t] DMA W_ADDR  awaddr=%h pack_buf=%h  beat0_wdata=pack_buf[%0d:0]=%h  beat1_wdata_will_be=pack_buf[%0d:%0d]=%h",$time, m_axi_awaddr, pack_buf,
-                          DATA_WIDTH-1, pack_buf[DATA_WIDTH-1:0],
-                         (DATA_WIDTH*2)-1, DATA_WIDTH, pack_buf[(DATA_WIDTH*2)-1:DATA_WIDTH]);
-                       end
+                    if (m_axi_awvalid && m_axi_awready) begin
+                        m_axi_awvalid <= 1'b0;    
+                        m_axi_wvalid  <= 1'b1;          
+                        m_axi_wdata   <= pack_buf[DATA_WIDTH - 1:0];
+                        m_axi_wstrb   <= '1;        
+                        m_axi_wlast   <= 1'b0;    
+                        w_state       <= W_DATA;
+                    end
                 end
-                
-                
+
                 W_DATA: begin
                     if (m_axi_wvalid && m_axi_wready) begin
                         if (!m_axi_wlast) begin
-                            m_axi_wdata <= pack_buf[(DATA_WIDTH * 2) - 1 : DATA_WIDTH]; 
+                            m_axi_wdata <= pack_buf[(DATA_WIDTH * 2) - 1 : DATA_WIDTH];
                             m_axi_wstrb <= '1;
                             m_axi_wlast <= 1'b1;
                         end else begin
@@ -375,17 +393,17 @@ module dma #(
 
                 W_RESP: begin
                     if (m_axi_bvalid && m_axi_bready) begin
-                        if (m_axi_bresp != 2'b00) 
-                            wr_error <= 1'b1;             
+                        if (m_axi_bresp != 2'b00)
+                            wr_error <= 1'b1;            
 
                         m_axi_bready <= 1'b0;
-                        m_axi_awaddr <= m_axi_awaddr + (BYTES_PER_WORD * 2); 
+                        m_axi_awaddr <= m_axi_awaddr + (BYTES_PER_WORD * 2);
 
-                        if (wr_bytes_left <= (BYTES_PER_WORD * 2)) begin
+                        if (wr_bytes_left == 1) begin
                             wr_done <= 1'b1;
                             w_state <= W_DONE;
                         end else begin
-                            wr_bytes_left <= wr_bytes_left - (BYTES_PER_WORD * 2);
+                            wr_bytes_left <= wr_bytes_left - 1'b1;
                             pack_elm_cnt  <= '0;
                             w_state       <= W_PACK;
                         end
